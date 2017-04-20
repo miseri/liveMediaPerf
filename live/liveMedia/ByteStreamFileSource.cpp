@@ -93,6 +93,12 @@ ByteStreamFileSource::~ByteStreamFileSource() {
 }
 
 void ByteStreamFileSource::doGetNextFrame() {
+ 
+  // Code to loop file 
+  if (feof(fFid)) {
+    seekToByteAbsolute(0, 0);
+  }
+
   if (feof(fFid) || ferror(fFid) || (fLimitNumBytesToStream && fNumBytesToStream == 0)) {
     handleClosure();
     return;
