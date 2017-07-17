@@ -115,13 +115,23 @@ ADTSAudioFileSource::~ADTSAudioFileSource() {
 // Note: We should change the following to use asynchronous file reading, #####
 // as we now do with ByteStreamFileSource. #####
 void ADTSAudioFileSource::doGetNextFrame() {
+  // loop file
+  if (feof(fFid) || ferror(fFid))
+  {
+    fprintf(stderr, "End of audio source, looping");
+    //SeekFile64(fFid, 0 , SEEK_SET);
+    rewind(fFid);
+  }
+
   // Begin by reading the 7-byte fixed_variable headers:
   unsigned char headers[7];
   if (fread(headers, 1, sizeof headers, fFid) < sizeof headers
       || feof(fFid) || ferror(fFid)) {
     // The input source has ended:
-    handleClosure();
-    return;
+    fprintf(stderr, "Handling closure. ");
+    rewind(fFid);
+    // handleClosure();
+    // return;
   }
 
   // Extract important fields from the headers:
