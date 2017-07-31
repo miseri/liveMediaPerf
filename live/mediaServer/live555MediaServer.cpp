@@ -39,6 +39,14 @@ int main(int argc, char** argv) {
   // and then with the alternative port number (8554):
   RTSPServer* rtspServer;
   portNumBits rtspServerPortNum = 554;
+
+  // HACK to make port configurable
+  if (argc == 2)
+  {
+    unsigned short port = atoi(argv[1]);
+    rtspServerPortNum = port; 
+  }
+
   rtspServer = DynamicRTSPServer::createNew(*env, rtspServerPortNum, authDB);
   if (rtspServer == NULL) {
     rtspServerPortNum = 8554;

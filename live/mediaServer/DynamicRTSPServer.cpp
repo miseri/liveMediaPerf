@@ -21,6 +21,9 @@ along with this library; if not, write to the Free Software Foundation, Inc.,
 #include "DynamicRTSPServer.hh"
 #include <liveMedia.hh>
 #include <string.h>
+#include <sstream>
+
+#define PERF_TIMEOUT_US 3000000
 
 DynamicRTSPServer*
 DynamicRTSPServer::createNew(UsageEnvironment& env, Port ourPort,
@@ -35,7 +38,10 @@ DynamicRTSPServer::createNew(UsageEnvironment& env, Port ourPort,
 DynamicRTSPServer::DynamicRTSPServer(UsageEnvironment& env, int ourSocket,
 				     Port ourPort,
 				     UserAuthenticationDatabase* authDatabase, unsigned reclamationTestSeconds)
-  : RTSPServerSupportingHTTPStreaming(env, ourSocket, ourPort, authDatabase, reclamationTestSeconds) {
+  : RTSPServerSupportingHTTPStreaming(env, ourSocket, ourPort, authDatabase, reclamationTestSeconds),
+  m_logPerformanceTask(NULL)
+{
+  m_logPerformanceTask = envir().taskScheduler().scheduleDelayedTask(PERF_TIMEOUT_US, (TaskFunc*)&DynamicRTSPServer::logCpuAndSessionInfoTask, this);
 }
 
 DynamicRTSPServer::~DynamicRTSPServer() {
@@ -81,6 +87,54 @@ ServerMediaSession* DynamicRTSPServer
   }
 }
 
+void DynamicRTSPServer::logCpuAndSessionInfoTask(DynamicRTSPServer* pRtspServer)
+{
+  pRtspServer->doLogCpuAndSessionInfoTask();
+}
+
+void DynamicRTSPServer::doLogCpuAndSessionInfoTask()
+{
+#ifndef _WIN32
+  static bool bAddThreadIdWatch = true;
+  if (bAddThreadIdWatch)
+  {
+    cpuMonitor.addThreadIdToCpuWatchList(CpuUtil::GetCurrentThreadId());
+    bAddThreadIdWatch = false;
+  }
+
+  cpuMonitor.manageCpuInfo();
+
+  std::ostringstream ostrCpuInfo("");
+  ostrCpuInfo << "LIVE555 PERF: "
+              << " RTSP clients: " << numClientSessions()
+              << " System Time Interval: " << cpuMonitor.GetCurrentCPUTimeInterval()
+              << " System CPU: " << cpuMonitor.GetCurrentCPULoad() << " ";
+
+  ostrCpuInfo << " Process CPU: " << cpuMonitor.GetCurrentProcCPULoad()
+              << " Process with child CPU: " << cpuMonitor.GetCurrentProcCPULoadWithChild() << "\n";
+
+//  for (auto cpuCoreUsage : cpuMonitor.GetCurrentCPUCoreLoad())
+//  {
+//    ostrCpuInfo << cpuCoreUsage.first << ": " << cpuCoreUsage.second << " ";
+//  }
+//
+//  for( auto threadCpuUsageAndCore : cpuMonitor.GetCurrentThreadCPULoadAndCore())
+//  {
+//    ostrCpuInfo << "ThreadId " << threadCpuUsageAndCore.first << ": " << threadCpuUsageAndCore.second.first << " with Core: " << threadCpuUsageAndCore.second.second << " ";
+//  }
+
+  fprintf( stderr, "%s", ostrCpuInfo.str().c_str());
+#endif
+
+  // schedule next check
+  envir().taskScheduler()
+    .rescheduleDelayedTask(m_logPerformanceTask,
+    PERF_TIMEOUT_US, // in microseconds
+    (TaskFunc*)&DynamicRTSPServer::logCpuAndSessionInfoTask, this);
+
+}
+
+
 // Special code for handling Matroska files:
 struct MatroskaDemuxCreationState {
   MatroskaFileServerDemux* demux;
@@ -119,7 +173,16 @@ static ServerMediaSession* createNewSMS(UsageEnvironment& env,
 
   ServerMediaSession* sms = NULL;
   Boolean const reuseSource = False;
-  if (strcmp(extension, ".aac") == 0) {
+  if (strcmp(extension, ".264") == 0) {
+    // performance test
+    // test audio and video subsessions
+    NEW_SMS("H.264 Video plus AAC audio");
+    OutPacketBuffer::maxSize = 300000; // allow for some possibly large H.264 frames
+    sms->addSubsession(H264VideoFileServerMediaSubsession::createNew(env, fileName, reuseSource));
+    if (strcmp(fileName, "test_av.264") == 0) {
+    	sms->addSubsession(ADTSAudioFileServerMediaSubsession::createNew(env, "test_n.aac", reuseSource));
+    }
+  } else if (strcmp(extension, ".aac") == 0) {
     // Assumed to be an AAC Audio (ADTS format) file:
     NEW_SMS("AAC Audio");
     sms->addSubsession(ADTSAudioFileServerMediaSubsession::createNew(env, fileName, reuseSource));
@@ -140,8 +203,6 @@ static ServerMediaSession* createNewSMS(UsageEnvironment& env,
     NEW_SMS("H.264 Video");
     OutPacketBuffer::maxSize = 300000; // allow for some possibly large H.264 frames
     sms->addSubsession(H264VideoFileServerMediaSubsession::createNew(env, fileName, reuseSource));
-    // HACK RG: to test audio and video subsessions
-    sms->addSubsession(ADTSAudioFileServerMediaSubsession::createNew(env, "test.aac", reuseSource));
   } else if (strcmp(extension, ".265") == 0) {
     // Assumed to be a H.265 Video Elementary Stream file:
     NEW_SMS("H.265 Video");

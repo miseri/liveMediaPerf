@@ -25,6 +25,8 @@ along with this library; if not, write to the Free Software Foundation, Inc.,
 #include "RTSPServerSupportingHTTPStreaming.hh"
 #endif
 
+#include "CpuUtil.h"
+
 class DynamicRTSPServer: public RTSPServerSupportingHTTPStreaming {
 public:
   static DynamicRTSPServer* createNew(UsageEnvironment& env, Port ourPort,
@@ -40,6 +42,56 @@ protected:
 protected: // redefined virtual functions
   virtual ServerMediaSession*
   lookupServerMediaSession(char const* streamName, Boolean isFirstLookupInSession);
+
+  virtual RTSPClientSession* createNewClientSession(u_int32_t sessionId)
+  {
+    return new LiveRTSPClientSession(*this, sessionId);
+  }
+
+  class LiveRTSPClientSession : public RTSPServer::RTSPClientSession 
+  {
+  public:
+    LiveRTSPClientSession(DynamicRTSPServer& ourServer, unsigned sessionId)
+      :RTSPClientSession(ourServer, sessionId),
+      m_pParent(&ourServer)
+    {
+
+    }
+
+  protected:
+    virtual void handleCmd_SETUP(RTSPServer::RTSPClientConnection* ourClientConnection,
+      char const* urlPreSuffix, char const* urlSuffix,
+      char const* fullRequestStr)
+    {
+#ifndef _WIN32
+      const double MAX_CPU_USAGE = 75.0;
+      float dCpuUsage = m_pParent->cpuMonitor.GetCurrentProcCPULoad();
+      fprintf( stderr, "Creating new RTSP client session: CPU load: %f\n", dCpuUsage);
+      if (dCpuUsage >= MAX_CPU_USAGE)
+      {
+        fprintf(stderr, "Max CPU usage reached. Rejecting request\n");
+        setRTSPResponse(ourClientConnection, "453 No Resources");
+        return;
+      }
+#endif
+
+
+      // Otherwise, handle the request as usual:
+      RTSPClientSession::handleCmd_SETUP(ourClientConnection, urlPreSuffix, urlSuffix, fullRequestStr);
+    }
+
+    DynamicRTSPServer* m_pParent;
+  };
+
+  TaskToken m_logPerformanceTask;
+
+  static void logCpuAndSessionInfoTask(DynamicRTSPServer* pRtspServer);
+  void doLogCpuAndSessionInfoTask();
+
+#ifndef _WIN32
+  CpuMonitor cpuMonitor;
+#endif
 };
 
 #endif
+
